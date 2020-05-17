@@ -1,5 +1,4 @@
 import math
-from sympy.geometry import *
 
 import numpy as np
 import Box2D
@@ -9,6 +8,7 @@ import gym
 from gym import error, spaces, utils
 from gym.utils import seeding, EzPickle
 from gym.envs.classic_control import rendering
+
 
 FPS = 50
 SCALE = 30
@@ -32,7 +32,22 @@ ARM_ANGLE = math.radians(35)
 JOINT_SPEED = 4
 MOTOR_TORQUE = 80
 
-TOTAL_LENGTH = 150
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def __add__(self, other):
+        return Point(self.x + other.x, self.y + other.y)
+
+    def __truediv__(self, other):
+        return Point(self.x / other, self.y / other)
+
+    def rotate(self, alpha):
+        return Point(self.x * math.cos(alpha) - self.y * math.sin(alpha),
+                     self.x * math.sin(alpha) + self.y * math.cos(alpha))
+
 
 class ContactDetector(contactListener):
     def __init__(self, env):
@@ -91,27 +106,51 @@ class SupercreatureEnv(gym.Env, EzPickle):
         high = np.array([np.inf] * 36)
         self.observation_space = spaces.Box(-high, high, dtype=np.float32)
 
+        #self.body.ApplyForceToCenter((self.np_random.uniform(-10000, 10000), self.np_random.uniform(-10000, 10000)), False)
+
+        self.steps = 0
+
+    def cleanup(self):
+        if self.terrain is None:
+            return
+
+        self.world.DestroyBody(self.terrain)
+        self.terrain = None
+        self.world.DestroyBody(self.body)
+        self.body = None
+        for limb in self.limbs:
+            self.world.DestroyBody(limb)
+        self.limbs = []
+        self.joints = []
+        self.world.contactListener = self.contactListener = None
+
+    def reset(self):
+        self.cleanup()
+
         terrain_h = 0.2 * H
         self.terrain_fixture.shape.vertices = [(-100000, 0), (-100000, terrain_h), (100000, terrain_h), (100000, 0)]
         self.terrain = self.world.CreateStaticBody(fixtures=self.terrain_fixture)
         self.terrain.color1 = (0.0, 1.0, 0.0)
 
+        self.contactListener = ContactDetector(self)
+        self.world.contactListener = self.contactListener
+
         base_limb_points = [
-            [Point2D(-LIMB_W[0] / 2, 0), Point2D(LIMB_W[0] / 2, 0),
-             Point2D(LIMB_W[0] / 2, -LIMB_L[0]), Point2D(-LIMB_W[0] / 2, -LIMB_L[0])],
-            [Point2D(-LIMB_W[1] / 2, -LIMB_L[0]), Point2D(LIMB_W[1] / 2, -LIMB_L[0]),
-             Point2D(LIMB_W[1] / 2, -LIMB_L[0] - LIMB_L[1]), Point2D(-LIMB_W[1] / 2, -LIMB_L[0] - LIMB_L[1])],
-            [Point2D(-LIMB_W[2] / 2, 0), Point2D(LIMB_W[2] / 2, 0),
-             Point2D(LIMB_W[2] / 2, -LIMB_L[2]), Point2D(-LIMB_W[2] / 2, -LIMB_L[2])],
-            [Point2D(-LIMB_W[3] / 2, -LIMB_L[2]), Point2D(LIMB_W[3] / 2, -LIMB_L[2]),
-             Point2D(LIMB_W[3] / 2, -LIMB_L[2] - LIMB_L[3]), Point2D(-LIMB_W[3] / 2, -LIMB_L[2] - LIMB_L[3])],
+            [Point(-LIMB_W[0] / 2, 0), Point(LIMB_W[0] / 2, 0),
+             Point(LIMB_W[0] / 2, -LIMB_L[0]), Point(-LIMB_W[0] / 2, -LIMB_L[0])],
+            [Point(-LIMB_W[1] / 2, -LIMB_L[0]), Point(LIMB_W[1] / 2, -LIMB_L[0]),
+             Point(LIMB_W[1] / 2, -LIMB_L[0] - LIMB_L[1]), Point(-LIMB_W[1] / 2, -LIMB_L[0] - LIMB_L[1])],
+            [Point(-LIMB_W[2] / 2, 0), Point(LIMB_W[2] / 2, 0),
+             Point(LIMB_W[2] / 2, -LIMB_L[2]), Point(-LIMB_W[2] / 2, -LIMB_L[2])],
+            [Point(-LIMB_W[3] / 2, -LIMB_L[2]), Point(LIMB_W[3] / 2, -LIMB_L[2]),
+             Point(LIMB_W[3] / 2, -LIMB_L[2] - LIMB_L[3]), Point(-LIMB_W[3] / 2, -LIMB_L[2] - LIMB_L[3])],
         ]
         left_leg_points = [[p.rotate(LEG_ANGLE) for p in base_limb_points[i]] for i in range(2)]
         right_leg_points = [[p.rotate(LEG_ANGLE) for p in base_limb_points[i]] for i in range(2)]
         left_arm_points = [[p.rotate(ARM_ANGLE) for p in base_limb_points[i]] for i in range(2, 4)]
         right_arm_points = [[p.rotate(ARM_ANGLE) for p in base_limb_points[i]] for i in range(2, 4)]
 
-        legHeight = -min([float(p.y) for p in left_leg_points[1]])
+        legHeight = -min([p.y for p in left_leg_points[1]])
         bodyY = float(terrain_h + legHeight + 0.1)
         bodyX = W * 0.1
 
@@ -125,8 +164,8 @@ class SupercreatureEnv(gym.Env, EzPickle):
         self.body.color1 = (1.0, 0.0, 0.0)
         self.body.contacts_ground = False
 
-        leg_offset = Point2D(bodyX + BODY_W / 2, bodyY)
-        arm_offset = Point2D(bodyX + BODY_W / 2, bodyY + BODY_L * (1 - ARM_Y_SHIFT))
+        leg_offset = Point(bodyX + BODY_W / 2, bodyY)
+        arm_offset = Point(bodyX + BODY_W / 2, bodyY + BODY_L * (1 - ARM_Y_SHIFT))
         all_points = left_leg_points + right_leg_points + left_arm_points + right_arm_points
         self.limbs = []
         for i in range(len(all_points)):
@@ -147,28 +186,6 @@ class SupercreatureEnv(gym.Env, EzPickle):
                 anchor=(float(offset.x), float(offset.y))
             ))
 
-        self.contactListener = ContactDetector(self)
-        self.world.contactListener = self.contactListener
-
-        #self.body.ApplyForceToCenter((self.np_random.uniform(-10000, 10000), self.np_random.uniform(-10000, 10000)), False)
-
-        self.steps = 0
-
-    def cleanup(self):
-        if self.terrain is None:
-            return
-
-        self.world.DestroyBody(self.terrain)
-        self.terrain = None
-        self.world.DestroyBody(self.body)
-        self.body = None
-        for limb in self.limbs:
-            self.world.DestroyBody(limb)
-        self.limbs = []
-        self.joints = []
-        self.world.contactListener = self.contactListener = None
-
-    def reset(self):
         self.body.linearVelocity.x = 0
         self.body.linearVelocity.y = 0
         self.body.angularVelocity = 0
@@ -232,7 +249,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
         new_body_pos = (self.body.worldCenter.x, self.body.worldCenter.x)
         reward += (new_body_pos[0] - old_body_pos[0]) * 130 / SCALE
         reward += (new_body_pos[1] - old_body_pos[1]) * 500 / SCALE
-        done = new_body_pos[0] > TOTAL_LENGTH
+        done = False
 
         if self.body.contacts_ground:
             reward = -200
