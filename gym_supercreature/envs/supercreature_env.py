@@ -19,16 +19,6 @@ VIEWPORT_H = 400
 W = VIEWPORT_W / SCALE
 H = VIEWPORT_H / SCALE
 
-FRICTION = 2.5
-
-BODY_L = 2
-BODY_W = 0.3
-LIMB_L = [0.85, 0.85, 0.65, 0.65]
-LIMB_W = [0.1, 0.1, 0.15, 0.15]
-ARM_Y_SHIFT = 0.1
-LEG_ANGLE = math.radians(15)
-ARM_ANGLE = math.radians(35)
-
 JOINT_SPEED = 4
 MOTOR_TORQUE = 80
 
@@ -88,22 +78,8 @@ class SupercreatureEnv(gym.Env, EzPickle):
         self.joints = []
         self.last_action = [0] * 8
 
-        self.body_fixture = fixtureDef(
-            shape=polygonShape(vertices=[]),
-            density=5.0,
-            friction=0.1,
-            categoryBits=0x0020,
-            maskBits=0x001,
-            restitution=0.0
-        )
-        self.terrain_fixture = fixtureDef(
-            shape=polygonShape(vertices=[]),
-            friction=FRICTION,
-            categoryBits=0x0001
-        )
-
         self.action_space = spaces.Box(np.array([-1] * 8), np.array([1] * 8), dtype=np.float32)
-        high = np.array([np.inf] * 36)
+        high = np.array([np.inf] * 48)
         self.observation_space = spaces.Box(-high, high, dtype=np.float32)
 
         #self.body.ApplyForceToCenter((self.np_random.uniform(-10000, 10000), self.np_random.uniform(-10000, 10000)), False)
@@ -127,6 +103,29 @@ class SupercreatureEnv(gym.Env, EzPickle):
     def reset(self):
         self.cleanup()
 
+        self.density = 7
+        self.friction = self.np_random.uniform(0.5, 1)
+        self.height_reward = 500
+        self.body_l = self.np_random.uniform(1.8, 2.5)
+        self.body_w = self.np_random.uniform(0.25, 0.35)
+        self.arm_y_shift = self.np_random.uniform(0.05, 0.15)
+        self.limb_l = self.np_random.uniform(0.6, 0.9, 4)
+        self.limb_w = self.np_random.uniform(0.075, 0.175, 4)
+
+        self.body_fixture = fixtureDef(
+            shape=polygonShape(vertices=[]),
+            density=self.density,
+            friction=self.friction,
+            categoryBits=0x0020,
+            maskBits=0x001,
+            restitution=0.0
+        )
+        self.terrain_fixture = fixtureDef(
+            shape=polygonShape(vertices=[]),
+            friction=1.0,
+            categoryBits=0x0001
+        )
+
         terrain_h = 0.2 * H
         self.terrain_fixture.shape.vertices = [(-100000, 0), (-100000, terrain_h), (100000, terrain_h), (100000, 0)]
         self.terrain = self.world.CreateStaticBody(fixtures=self.terrain_fixture)
@@ -136,19 +135,20 @@ class SupercreatureEnv(gym.Env, EzPickle):
         self.world.contactListener = self.contactListener
 
         base_limb_points = [
-            [Point(-LIMB_W[0] / 2, 0), Point(LIMB_W[0] / 2, 0),
-             Point(LIMB_W[0] / 2, -LIMB_L[0]), Point(-LIMB_W[0] / 2, -LIMB_L[0])],
-            [Point(-LIMB_W[1] / 2, -LIMB_L[0]), Point(LIMB_W[1] / 2, -LIMB_L[0]),
-             Point(LIMB_W[1] / 2, -LIMB_L[0] - LIMB_L[1]), Point(-LIMB_W[1] / 2, -LIMB_L[0] - LIMB_L[1])],
-            [Point(-LIMB_W[2] / 2, 0), Point(LIMB_W[2] / 2, 0),
-             Point(LIMB_W[2] / 2, -LIMB_L[2]), Point(-LIMB_W[2] / 2, -LIMB_L[2])],
-            [Point(-LIMB_W[3] / 2, -LIMB_L[2]), Point(LIMB_W[3] / 2, -LIMB_L[2]),
-             Point(LIMB_W[3] / 2, -LIMB_L[2] - LIMB_L[3]), Point(-LIMB_W[3] / 2, -LIMB_L[2] - LIMB_L[3])],
+            [Point(-self.limb_w[0] / 2, 0), Point(self.limb_w[0] / 2, 0),
+             Point(self.limb_w[0] / 2, -self.limb_l[0]), Point(-self.limb_w[0] / 2, -self.limb_l[0])],
+            [Point(-self.limb_w[1] / 2, -self.limb_l[0]), Point(self.limb_w[1] / 2, -self.limb_l[0]),
+             Point(self.limb_w[1] / 2, -self.limb_l[0] - self.limb_l[1]), Point(-self.limb_w[1] / 2, -self.limb_l[0] - self.limb_l[1])],
+            [Point(-self.limb_w[2] / 2, 0), Point(self.limb_w[2] / 2, 0),
+             Point(self.limb_w[2] / 2, -self.limb_l[2]), Point(-self.limb_w[2] / 2, -self.limb_l[2])],
+            [Point(-self.limb_w[3] / 2, -self.limb_l[2]), Point(self.limb_w[3] / 2, -self.limb_l[2]),
+             Point(self.limb_w[3] / 2, -self.limb_l[2] - self.limb_l[3]), Point(-self.limb_w[3] / 2, -self.limb_l[2] - self.limb_l[3])],
         ]
-        left_leg_points = [[p.rotate(LEG_ANGLE) for p in base_limb_points[i]] for i in range(2)]
-        right_leg_points = [[p.rotate(LEG_ANGLE) for p in base_limb_points[i]] for i in range(2)]
-        left_arm_points = [[p.rotate(ARM_ANGLE) for p in base_limb_points[i]] for i in range(2, 4)]
-        right_arm_points = [[p.rotate(ARM_ANGLE) for p in base_limb_points[i]] for i in range(2, 4)]
+        angles = self.np_random.uniform(-math.pi / 4, math.pi / 4, 4)
+        left_leg_points = [[p.rotate(angles[0]) for p in base_limb_points[i]] for i in range(2)]
+        right_leg_points = [[p.rotate(angles[1]) for p in base_limb_points[i]] for i in range(2)]
+        left_arm_points = [[p.rotate(angles[2]) for p in base_limb_points[i]] for i in range(2, 4)]
+        right_arm_points = [[p.rotate(angles[3]) for p in base_limb_points[i]] for i in range(2, 4)]
 
         legHeight = -min([p.y for p in left_leg_points[1]])
         bodyY = float(terrain_h + legHeight + 0.1)
@@ -156,22 +156,22 @@ class SupercreatureEnv(gym.Env, EzPickle):
 
         self.body_fixture.shape.vertices = [
             (bodyX, bodyY),
-            (bodyX + BODY_W, bodyY),
-            (bodyX + BODY_W, bodyY + BODY_L),
-            (bodyX, bodyY + BODY_L)
+            (bodyX + self.body_w, bodyY),
+            (bodyX + self.body_w, bodyY + self.body_l),
+            (bodyX, bodyY + self.body_l)
         ]
         self.body = self.world.CreateDynamicBody(fixtures=self.body_fixture)
         self.body.color1 = (1.0, 0.0, 0.0)
         self.body.contacts_ground = False
 
-        leg_offset = Point(bodyX + BODY_W / 2, bodyY)
-        arm_offset = Point(bodyX + BODY_W / 2, bodyY + BODY_L * (1 - ARM_Y_SHIFT))
+        leg_offset = Point(bodyX + self.body_w / 2, bodyY)
+        arm_offset = Point(bodyX + self.body_w / 2, bodyY + self.body_l * (1 - self.arm_y_shift))
         all_points = left_leg_points + right_leg_points + left_arm_points + right_arm_points
         self.limbs = []
         for i in range(len(all_points)):
             offset = leg_offset if i < 4 else arm_offset
             all_points[i] = [p + offset for p in all_points[i]]
-            self.body_fixture.shape.vertices = [(float(p.x), float(p.y)) for p in all_points[i]]
+            self.body_fixture.shape.vertices = [(p.x, p.y) for p in all_points[i]]
             limb = self.world.CreateDynamicBody(fixtures=self.body_fixture)
             limb.color1 = (1.0, 0.0, 0.0)
             limb.contacts_ground = False
@@ -183,7 +183,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
             self.joints.append(self.world.CreateRevoluteJoint(
                 bodyA=bodyA,
                 bodyB=self.limbs[i],
-                anchor=(float(offset.x), float(offset.y))
+                anchor=(offset.x, offset.y)
             ))
 
         self.body.linearVelocity.x = 0
@@ -216,6 +216,15 @@ class SupercreatureEnv(gym.Env, EzPickle):
 
     def get_state(self):
         state = [
+            self.friction,
+            self.body_l,
+            self.body_w,
+            self.arm_y_shift,
+        ]
+        state += self.limb_l.tolist()
+        state += self.limb_w.tolist()
+
+        state += [
             self.body.linearVelocity.x,
             self.body.linearVelocity.y,
             self.body.angle,
@@ -248,7 +257,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
 
         new_body_pos = (self.body.worldCenter.x, self.body.worldCenter.x)
         reward += (new_body_pos[0] - old_body_pos[0]) * 130 / SCALE
-        reward += (new_body_pos[1] - old_body_pos[1]) * 500 / SCALE
+        reward += (new_body_pos[1] - old_body_pos[1]) * self.height_reward / SCALE
         done = False
 
         if self.body.contacts_ground:
@@ -271,7 +280,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
         if self.viewer is None:
             self.viewer = rendering.Viewer(VIEWPORT_W, VIEWPORT_H)
 
-        self.scroll = self.body.position.x // W * W
+        self.scroll = self.body.worldCenter.x // W * W
 
         self.viewer.set_bounds(self.scroll, W + self.scroll, 0, H)
         self.viewer.draw_polygon([
