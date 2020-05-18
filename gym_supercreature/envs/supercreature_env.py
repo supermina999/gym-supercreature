@@ -126,8 +126,8 @@ class SupercreatureEnv(gym.Env, EzPickle):
             categoryBits=0x0001
         )
 
-        terrain_h = 0.2 * H
-        self.terrain_fixture.shape.vertices = [(-100000, 0), (-100000, terrain_h), (100000, terrain_h), (100000, 0)]
+        self.terrain_h = 0.2 * H
+        self.terrain_fixture.shape.vertices = [(-100000, 0), (-100000, self.terrain_h), (100000, self.terrain_h), (100000, 0)]
         self.terrain = self.world.CreateStaticBody(fixtures=self.terrain_fixture)
         self.terrain.color1 = (0.0, 1.0, 0.0)
 
@@ -151,7 +151,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
         right_arm_points = [[p.rotate(angles[3]) for p in base_limb_points[i]] for i in range(2, 4)]
 
         legHeight = -min([p.y for p in left_leg_points[1]])
-        bodyY = float(terrain_h + legHeight + 0.1)
+        bodyY = float(self.terrain_h + legHeight + 0.1)
         bodyX = W * 0.1
 
         self.body_fixture.shape.vertices = [
@@ -249,7 +249,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
             self.joints[i].motorEnabled = True
             self.joints[i].motorSpeed = float(JOINT_SPEED * np.sign(action[i]))
             self.joints[i].maxMotorTorque = float(MOTOR_TORQUE * np.clip(np.abs(action[i]), 0, 1))
-            reward -= 0.00035 * MOTOR_TORQUE * np.clip(np.abs(action[i]), 0, 1)
+            #reward -= 0.00035 * MOTOR_TORQUE * np.clip(np.abs(action[i]), 0, 1)
 
         self.steps += 1
 
@@ -260,8 +260,14 @@ class SupercreatureEnv(gym.Env, EzPickle):
         reward += (new_body_pos[1] - old_body_pos[1]) * self.height_reward / SCALE
         done = False
 
+        body_angle = self.body.angle
+        reward += 3 - math.fabs(body_angle)
+        if body_angle < -math.radians(60) or body_angle > math.radians(60):
+            reward = -2000
+            done = True
+
         if self.body.contacts_ground:
-            reward = -200
+            reward = -2000
             done = True
 
         if self.steps > 1000:
@@ -314,7 +320,7 @@ if __name__=="__main__":
         action = env.action_space.sample()
         observation, reward, done, info = env.step([1, 0, 0, 0, 0, 0, 0, 0])
         rs += reward
-        print(rs)
+        #print(rs)
         env.render()
         if done:
             rs = 0
