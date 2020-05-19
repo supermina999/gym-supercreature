@@ -79,7 +79,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
         self.last_action = [0] * 8
 
         self.action_space = spaces.Box(np.array([-1] * 8), np.array([1] * 8), dtype=np.float32)
-        high = np.array([np.inf] * 48)
+        high = np.array([np.inf] * 65)
         self.observation_space = spaces.Box(-high, high, dtype=np.float32)
 
         #self.body.ApplyForceToCenter((self.np_random.uniform(-10000, 10000), self.np_random.uniform(-10000, 10000)), False)
@@ -224,7 +224,10 @@ class SupercreatureEnv(gym.Env, EzPickle):
         state += self.limb_l.tolist()
         state += self.limb_w.tolist()
 
+        body_center = (self.body.worldCenter.x, self.body.worldCenter.y)
+
         state += [
+            body_center[1],
             self.body.linearVelocity.x,
             self.body.linearVelocity.y,
             self.body.angle,
@@ -234,46 +237,59 @@ class SupercreatureEnv(gym.Env, EzPickle):
             state.append(self.joints[i].angle)
             state.append(self.joints[i].speed)
             state.append(1.0 if self.limbs[i].contacts_ground else 0.0)
+        for limb in self.limbs:
+            state.append(limb.worldCenter.x - body_center[0])
+            state.append(limb.worldCenter.y - body_center[1])
         for i in range(len(self.last_action)):
             state.append(self.last_action[i])
 
         return np.array(state)
 
     def step(self, action):
-        old_body_pos = (self.body.worldCenter.x, self.body.worldCenter.x)
+        old_body_pos = (self.body.worldCenter.x, self.body.worldCenter.y)
         self.last_action = action
 
-        reward = 0
+        energy = 0
 
         for i in range(len(self.joints)):
             self.joints[i].motorEnabled = True
             self.joints[i].motorSpeed = float(JOINT_SPEED * np.sign(action[i]))
             self.joints[i].maxMotorTorque = float(MOTOR_TORQUE * np.clip(np.abs(action[i]), 0, 1))
-            #reward -= 0.00035 * MOTOR_TORQUE * np.clip(np.abs(action[i]), 0, 1)
+            energy += MOTOR_TORQUE * np.clip(np.abs(action[i]), 0, 1)
 
         self.steps += 1
 
         self.world.Step(1.0/FPS, 6*30, 2*30)
 
-        new_body_pos = (self.body.worldCenter.x, self.body.worldCenter.x)
-        reward += (new_body_pos[0] - old_body_pos[0]) * 130 / SCALE
-        reward += (new_body_pos[1] - old_body_pos[1]) * self.height_reward / SCALE
+        new_body_pos = (self.body.worldCenter.x, self.body.worldCenter.y)
+        x_speed = new_body_pos[0] - old_body_pos[0]
+        x_speed_reward = x_speed * 130 / SCALE
+        height_reward = 0 #(new_body_pos[1] - old_body_pos[1]) * 500 / SCALE
+        energy_reward = energy * 0
+
         done = False
 
-        body_angle = self.body.angle
-        reward += 3 - math.fabs(body_angle)
-        if body_angle < -math.radians(60) or body_angle > math.radians(60):
-            reward = -2000
+        reward = x_speed_reward + height_reward + energy_reward
+
+        if new_body_pos[1] < self.terrain_h + self.body_l * 0.65:
+            reward = -10
             done = True
 
         if self.body.contacts_ground:
-            reward = -2000
+            reward = -10
             done = True
 
         if self.steps > 1000:
             done = True
 
-        return self.get_state(), reward, done, {}
+        return self.get_state(), reward, done, {
+            'x_speed': x_speed,
+            'height': new_body_pos[1],
+            'energy': energy,
+            'x_speed_reward': x_speed_reward,
+            'height_reward': height_reward,
+            'energy_reward': energy_reward
+        }
 
     def drawBody(self, body):
         transform = body.fixtures[0].body.transform
@@ -320,7 +336,7 @@ if __name__=="__main__":
         action = env.action_space.sample()
         observation, reward, done, info = env.step([1, 0, 0, 0, 0, 0, 0, 0])
         rs += reward
-        #print(rs)
+        print(rs)
         env.render()
         if done:
             rs = 0
