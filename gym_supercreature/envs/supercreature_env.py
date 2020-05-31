@@ -20,7 +20,7 @@ W = VIEWPORT_W / SCALE
 H = VIEWPORT_H / SCALE
 
 JOINT_SPEED = 4
-MOTOR_TORQUE = 80
+MOTOR_TORQUE = 40
 
 
 class Point:
@@ -79,7 +79,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
         self.last_action = [0] * 8
 
         self.action_space = spaces.Box(np.array([-1] * 8), np.array([1] * 8), dtype=np.float32)
-        high = np.array([np.inf] * 65)
+        high = np.array([np.inf] * 66)
         self.observation_space = spaces.Box(-high, high, dtype=np.float32)
 
         #self.body.ApplyForceToCenter((self.np_random.uniform(-10000, 10000), self.np_random.uniform(-10000, 10000)), False)
@@ -104,13 +104,14 @@ class SupercreatureEnv(gym.Env, EzPickle):
         self.cleanup()
 
         self.density = 7
-        self.friction = self.np_random.uniform(0.5, 1)
+        self.height_limit_coef = self.np_random.uniform(0.3, 0.8)
+        self.friction = self.np_random.uniform(0.3, 1)
         self.height_reward = 500
-        self.body_l = self.np_random.uniform(1.8, 2.5)
-        self.body_w = self.np_random.uniform(0.25, 0.35)
-        self.arm_y_shift = self.np_random.uniform(0.05, 0.15)
-        self.limb_l = self.np_random.uniform(0.6, 0.9, 4)
-        self.limb_w = self.np_random.uniform(0.075, 0.175, 4)
+        self.body_l = self.np_random.uniform(1.5, 2.7)
+        self.body_w = self.np_random.uniform(0.2, 0.4)
+        self.arm_y_shift = self.np_random.uniform(0.0, 0.25)
+        self.limb_l = self.np_random.uniform(0.4, 1.1, 4)
+        self.limb_w = self.np_random.uniform(0.055, 0.225, 4)
 
         self.body_fixture = fixtureDef(
             shape=polygonShape(vertices=[]),
@@ -216,6 +217,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
 
     def get_state(self):
         state = [
+            self.height_limit_coef,
             self.friction,
             self.body_l,
             self.body_w,
@@ -271,7 +273,7 @@ class SupercreatureEnv(gym.Env, EzPickle):
 
         reward = x_speed_reward + height_reward + energy_reward
 
-        if new_body_pos[1] < self.terrain_h + self.body_l * 0.65:
+        if new_body_pos[1] < self.terrain_h + (self.body_l + self.limb_l[0] + self.limb_l[1] + self.limb_l[2] + self.limb_l[3]) / 2.0 * self.height_limit_coef:
             reward = -10
             done = True
 
